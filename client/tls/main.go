@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"github.com/kubemq-io/kubemq-go"
 	"log"
 )
@@ -64,5 +63,5 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(fmt.Sprintf("%++v", result))
+	log.Printf("%++v", result)
 }
