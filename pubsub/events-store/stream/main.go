@@ -16,7 +16,7 @@ func main() {
 	defer cancel()
 	sender, err := kubemq.NewClient(ctx,
 		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-pubsub-events-store-store-stream-sender"),
+		kubemq.WithClientId("go-sdk-cookbook-pubsub-events-store-stream-sender"),
 		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
 	if err != nil {
 		log.Fatal(err)
@@ -30,7 +30,7 @@ func main() {
 
 	receiverA, err := kubemq.NewClient(ctx,
 		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-pubsub-events-store-store-stream-receiver-a"),
+		kubemq.WithClientId("go-sdk-cookbook-pubsub-events-store-stream-receiver-a"),
 		kubemq.WithTransportType(kubemq.TransportTypeGRPC),
 		kubemq.WithAutoReconnect(true))
 
@@ -46,7 +46,7 @@ func main() {
 
 	receiverB, err := kubemq.NewClient(ctx,
 		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-pubsub-events-store-store-stream-receiver-b"),
+		kubemq.WithClientId("go-sdk-cookbook-pubsub-events-store-stream-receiver-b"),
 		kubemq.WithTransportType(kubemq.TransportTypeGRPC),
 		kubemq.WithAutoReconnect(true))
 	if err != nil {
