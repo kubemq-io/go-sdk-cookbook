@@ -29,7 +29,6 @@ kubectl port-forward svc/kubemq-cluster-grpc 50000:50000 -n kubemq
 |                      | Re-Connect               | Client with re-connect                                                  |
 |                      | Authentication           | Client with JWT Authentication token                                    |
 |                      | TLS                      | Client with TLS                                                         |
-|                      |                          |                                                                         |
 | Queues               |                          |                                                                         |
 |                      | Single                   | Send/Receive single queue message                                       |
 |                      | Batch                    | Send/Receive batch queue messages                                       |
@@ -43,7 +42,6 @@ kubectl port-forward svc/kubemq-cluster-grpc 50000:50000 -n kubemq
 |                      | Stream-resend            | Send/Stream receive queue messages with resend to another queue         |
 |                      | Peek                     | Peek queue messages                                                     |
 |                      | Ack-All                  | Ack all messages in queue                                               |
-|                      |                          |                                                                         |
 | Pub/Sub Events       |                          |                                                                         |
 |                      | Single                   |  Send/Subscribe events messages                                                                        |
 |                      | Stream                   |  Stream Send/Subscribe events messages                                                                       |
@@ -51,7 +49,6 @@ kubectl port-forward svc/kubemq-cluster-grpc 50000:50000 -n kubemq
 |                      | Multicast                |  Send/Subscribe to multiple events channels                                                                       |
 |                      | Multicast Mix            |  Send/Subscribe events messages to queues, events-store and events channels                                                                      |
 |                      | Wildcards                |  Send/Subscribe events messages with wildcard subscription|
-|                      |                          |                                                                         |
 | Pub/Sub Events Store |                          |                                                                         |
 |                      | Single                   |  Send/Subscribe events store messages                                                                         |
 |                      | Stream                   |  Stream Send/Subscribe events store messages                                                                       |
@@ -59,8 +56,7 @@ kubectl port-forward svc/kubemq-cluster-grpc 50000:50000 -n kubemq
 |                      | Multicast                |   Send/Subscribe to multiple events store channels                                                                      |
 |                      | Multicast Mix            |   Send/Subscribe events store messages to queues, events-store and events channels                                                                      |
 |                      | Offset                   |  Send/Subscribe events store messages with offset subscription|
-|                      |                          |                                                                         |
 | RPC                  |                          |                                                                         |
 |                      | Commands                 | Send/Subscribe rpc command messages                                                                         |
 |                      | Queries                  |  Send/Subscribe rpc query messages                                                                        |
-|                      |                          |                                                                         |
+
