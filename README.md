@@ -1,8 +1,8 @@
-# Go SDK Cookbook
+# KubeMQ Go SDK Cookbook
 
 KubeMQ Go SDK Cookbook
 
-## Get Started
+## Install KubeMQ Cluster/Server
 
 Every installation method requires a KubeMQ key.
 Please [register](https://account.kubemq.io/login/register) to obtain your KubeMQ key.
@@ -51,7 +51,11 @@ Steps:
 2. Unpack the downloaded archive
 3. Run ```kubemq -k {{your key}}``` (A key is needed for the first time only)
 
+## Install KubeMQ Go SDK
 
+```
+go get github.com/kubemq-io/kubemq-go
+```
 ## Recipes
 
 | Category             | Sub-Category             | Description                                                             |
