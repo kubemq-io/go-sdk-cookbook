@@ -97,3 +97,9 @@ go get github.com/kubemq-io/kubemq-go
 |                      | Commands                 | Send/Subscribe rpc command messages                                                                         |
 |                      | Queries                  |  Send/Subscribe rpc query messages                                                                        |
 
+
+## Support
+if you encounter any issues, please open an issue here,
+In addition, you can reach us for support by:
+- [**Email**](mailto://support@kubemq.io)
+- [**Slack**](https://kubmq.slack.com)
