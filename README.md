@@ -99,7 +99,7 @@ go get github.com/kubemq-io/kubemq-go
 
 
 ## Support
-if you encounter any issues, please open an issue here,
-In addition, you can reach us for support by:
-- [**Email**](mailto://support@kubemq.io)
-- [**Slack**](https://kubmq.slack.com)
+You can reach us at:
+- [**Email**](mailto:support@kubemq.io)
+- [**Slack**](https://kubemq.slack.com) - [Invitation](https://join.slack.com/t/kubemq/shared_invite/enQtNDk3NjE1Mjg1MDMwLThjMGFmYjU1NTVhZWRjZTRjYTIxM2E5MjA5ZDFkMWUyODI3YTlkOWY2MmYzNGIwZjY3OThlMzYxYjYwMTVmYWM) 
+

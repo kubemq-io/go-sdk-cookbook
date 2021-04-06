@@ -4,12 +4,12 @@ import (
 	"context"
 	"github.com/kubemq-io/kubemq-go"
 	"log"
+	"time"
 )
 
 // Basic client with client JWT authentication token
 // KubeMQ public key verification file is required
-
-const authToken = `eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.eyJDbGllbnRJRCI6ImNsaWVudF9pZCIsIlN0YW5kYXJkQ2xhaW1zIjp7ImV4cCI6MTYxNzQyMDE5NX19.IN2rJjat-L7Ib1zcQPN-hdqmjfGHQ-y559j5L5_Kf8DydQCj0aefWRZWQA8QcE7MRFoPcRL7ToemGHLwCQ7_fyUGQsCp37_yRu-ZZ5fOKByWn4ctfcDipJNUng06Rar6j4IqwWIyNEkn8lXXQeQv1azmeA5l58pPzVagEM7WCcxSNLKYSgdBXLl01-7r2J_V6R_yPqEKkS19Fsa8H1PnJFckflNTX7UrM1mp6-yIT3EaGkk6_jeXAryp1-UlP0NJvpoRvmwZz89lzlQ2wpZ99_T6SEuX9J-8oE5Tb4N87RUAHgm_tsspAEmpkhOWZy5t0z5ye4Y3C8GLqDR_k55CBg`
+const authToken = `eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.eyJleHAiOjgzNDUzOTQxODV9.l6WdainvCQ8EJ9CFrH7eLBKlZEj69pBpq4T7OXr-NvT_yKWCaq5s3KC1sJrKquyDZvMNKQuGtW3TY8i803kg4V8TsWmmrTAJ5XiTXMg--qMnmmvTu2V1uHd1EaHZXSxHtx58tFtB5v10mRw74qJ18uiROT04YZ0sHKV4ZZG4ZHpvcHrTmZ1mwG-5i2hFol2dR7uad4umkDvFaPlzl4wq-y5-rMBYr8zS-IevWLaL794jxLgjrzV2stQWmbcb5Krrgo0GFS_OjGbt2qjYZ9spPYe6lz6Rktsw9NzbJEYSQnps2Yjemzw-D1o6eY9iPMXnIg3LN4swuxdcXwxz1rRMIg`
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -29,9 +29,28 @@ func main() {
 		}
 	}()
 
-	result, err := client.Ping(ctx)
+	channel := "queues.single"
+
+	sendResult, err := client.NewQueueMessage().
+		SetChannel(channel).
+		SetBody([]byte("some-simple_queue-queue-message")).
+		Send(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("%++v", result)
+	log.Printf("Send to Queue Result: MessageID:%s,Sent At: %s\n", sendResult.MessageID, time.Unix(0, sendResult.SentAt).String())
+
+	receiveResult, err := client.NewReceiveQueueMessagesRequest().
+		SetChannel(channel).
+		SetMaxNumberOfMessages(1).
+		SetWaitTimeSeconds(1).
+		Send(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Received %d Messages:\n", receiveResult.MessagesReceived)
+	for _, msg := range receiveResult.Messages {
+		log.Printf("MessageID: %s, Body: %s", msg.MessageID, string(msg.Body))
+	}
+
 }
