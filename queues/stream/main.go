@@ -2,75 +2,75 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/kubemq-io/kubemq-go"
+	"github.com/nats-io/nuid"
 	"log"
-	"sync"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sender, err := kubemq.NewClient(ctx,
+	queuesClient, err := kubemq.NewQueuesClient(ctx,
 		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-queues-stream-sender"),
+		kubemq.WithClientId("go-sdk-cookbook-queues-stream"),
 		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer func() {
-		err := sender.Close()
+		err := queuesClient.Close()
 		if err != nil {
 			log.Fatal(err)
 		}
 	}()
 
-	receiver, err := kubemq.NewClient(ctx,
-		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-queues-delayed-sender"),
-		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
-	if err != nil {
-		log.Fatal(err)
+	channel := "queues.extend"
 
-	}
-	defer func() {
-		err := receiver.Close()
+	doneA, err := queuesClient.TransactionStream(ctx, &kubemq.QueueTransactionMessageRequest{
+		ClientID:          "go-sdk-cookbook-queues-stream-visibility",
+		Channel:           channel,
+		VisibilitySeconds: 1,
+		WaitTimeSeconds:   10,
+	}, func(response *kubemq.QueueTransactionMessageResponse, err error) {
 		if err != nil {
-			log.Fatal(err)
-		}
-	}()
-	channel := "queues.stream"
-	batch := sender.NewQueueMessages()
-	for i := 0; i < 1000; i++ {
-		batch.Add(kubemq.NewQueueMessage().SetChannel(channel).SetBody([]byte("some-stream_simple-queue-message")))
-	}
-	_, err = batch.Send(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("1000 messages sent")
 
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-	for i := 0; i < 2; i++ {
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 500; i++ {
-				stream := receiver.NewStreamQueueMessage().SetChannel(channel)
-
-				// get message from the queue
-				msg, err := stream.Next(ctx, 15, 10)
-				if err != nil {
-					log.Fatal(err)
-				}
-
-				err = msg.Ack()
-				if err != nil {
-					log.Fatal(err)
-				}
-				stream.Close()
+		} else {
+			log.Printf("Queue: Receiver MessageID: %s, Body: %s - ack message", response.Message.MessageID, string(response.Message.Body))
+			err = response.Ack()
+			if err != nil {
+				log.Fatal(err)
 			}
-		}()
+		}
+
+	})
+	if err != nil {
+		log.Fatal(err)
 	}
-	wg.Wait()
-	log.Printf("1000 messages received")
+	for i := 1; i <= 10; i++ {
+		messageID := nuid.New().Next()
+		sendResult, err := queuesClient.Send(ctx, kubemq.NewQueueMessage().
+			SetId(messageID).
+			SetChannel(channel).
+			SetBody([]byte(fmt.Sprintf("sending message %d", i))))
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		log.Printf("Send to Queue Result: MessageID:%s,Sent At: %s\n", sendResult.MessageID, time.Unix(0, sendResult.SentAt).String())
+	}
+	var gracefulShutdown = make(chan os.Signal, 1)
+	signal.Notify(gracefulShutdown, syscall.SIGTERM)
+	signal.Notify(gracefulShutdown, syscall.SIGINT)
+	signal.Notify(gracefulShutdown, syscall.SIGQUIT)
+	select {
+
+	case <-gracefulShutdown:
+
+	}
+	doneA <- struct{}{}
 }

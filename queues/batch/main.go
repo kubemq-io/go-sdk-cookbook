@@ -5,49 +5,46 @@ import (
 	"fmt"
 	"github.com/kubemq-io/kubemq-go"
 	"log"
-	"time"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client, err := kubemq.NewClient(ctx,
+	queuesClient, err := kubemq.NewQueuesClient(ctx,
 		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-queues-batch-client"),
+		kubemq.WithClientId("go-sdk-cookbook-queues-batch"),
 		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer func() {
-		err := client.Close()
+		err := queuesClient.Close()
 		if err != nil {
 			log.Fatal(err)
 		}
 	}()
 	channel := "queues.batch"
-	batch := client.NewQueueMessages()
+	var batch []*kubemq.QueueMessage
 	for i := 0; i < 10; i++ {
-		batch.Add(client.NewQueueMessage().
+		batch = append(batch, kubemq.NewQueueMessage().
 			SetChannel(channel).SetBody([]byte(fmt.Sprintf("Batch Message %d", i))))
 	}
-	batchResult, err := batch.Send(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, sendResult := range batchResult {
-		log.Printf("Send to Queue Result: MessageID:%s,Sent At: %s\n", sendResult.MessageID, time.Unix(0, sendResult.SentAt).String())
-	}
 
-	receiveResult, err := client.NewReceiveQueueMessagesRequest().
-		SetChannel(channel).
-		SetMaxNumberOfMessages(10).
-		SetWaitTimeSeconds(1).
-		Send(ctx)
+	_, err = queuesClient.Batch(ctx, batch)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("Received %d Messages:\n", receiveResult.MessagesReceived)
-	for _, msg := range receiveResult.Messages {
+	result, err := queuesClient.Pull(ctx, &kubemq.ReceiveQueueMessagesRequest{
+		ClientID:            "go-sdk-cookbook-queues-batch",
+		Channel:             channel,
+		MaxNumberOfMessages: 10,
+		WaitTimeSeconds:     2,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Received %d Messages:\n", result.MessagesReceived)
+	for _, msg := range result.Messages {
 		log.Printf("MessageID: %s, Body: %s", msg.MessageID, string(msg.Body))
 	}
 

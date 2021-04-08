@@ -11,103 +11,51 @@ import (
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sender, err := kubemq.NewClient(ctx,
+	queuesClient, err := kubemq.NewQueuesClient(ctx,
 		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-queues-expiration-sender"),
+		kubemq.WithClientId("go-sdk-cookbook-queues-expiration"),
 		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer func() {
-		err := sender.Close()
+		err := queuesClient.Close()
 		if err != nil {
 			log.Fatal(err)
 		}
 	}()
 	channel := "queues.expiration"
 
-	workerA, err := kubemq.NewClient(ctx,
-		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-queues-worker-a"),
-		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer func() {
-		err := workerA.Close()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}()
-	workerB, err := kubemq.NewClient(ctx,
-		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-queues-worker-b"),
-		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer func() {
-		err := workerB.Close()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}()
-
-	batch := sender.NewQueueMessages()
+	var batch []*kubemq.QueueMessage
 	for i := 0; i < 10; i++ {
-		batch.Add(sender.NewQueueMessage().
-			SetChannel(channel).
-			SetBody([]byte(fmt.Sprintf("Batch Message %d", i))).
-			SetPolicyExpirationSeconds(2))
-
+		batch = append(batch, kubemq.NewQueueMessage().
+			SetChannel(channel).SetBody([]byte(fmt.Sprintf("Batch Message %d", i))).
+			SetPolicyExpirationSeconds(5).AddTag("message", fmt.Sprintf("%d", i)))
 	}
-	batchResult, err := batch.Send(ctx)
+
+	_, err = queuesClient.Batch(ctx, batch)
 	if err != nil {
 		log.Fatal(err)
 	}
-	for _, sendResult := range batchResult {
-		log.Printf("Send to Queue Result: MessageID:%s,Sent At: %s\n", sendResult.MessageID, time.Unix(0, sendResult.SentAt).String())
+	result, err := queuesClient.Peek(ctx, &kubemq.ReceiveQueueMessagesRequest{
+		ClientID:            "go-sdk-cookbook-queues-expire",
+		Channel:             channel,
+		MaxNumberOfMessages: 10,
+		WaitTimeSeconds:     1,
+	})
+	if err != nil {
+		log.Fatal(err)
 	}
-	// waiting for 5 seconds
+	log.Printf("Peek Received %d Messages\n", result.MessagesReceived)
 	time.Sleep(5 * time.Second)
-
-	go func() {
-		for {
-			receiveResult, err := workerA.NewReceiveQueueMessagesRequest().
-				SetChannel(channel).
-				SetMaxNumberOfMessages(10).
-				SetWaitTimeSeconds(2).
-				Send(ctx)
-			if err != nil {
-				return
-			}
-			log.Printf("Worker A Received %d Messages:\n", receiveResult.MessagesReceived)
-			for _, msg := range receiveResult.Messages {
-				log.Printf("MessageID: %s, Body: %s", msg.MessageID, string(msg.Body))
-			}
-			log.Printf("Worker A notified of %d Expired Messages:\n", receiveResult.MessagesExpired)
-
-		}
-
-	}()
-
-	go func() {
-		for {
-			receiveResult, err := workerB.NewReceiveQueueMessagesRequest().
-				SetChannel(channel).
-				SetMaxNumberOfMessages(10).
-				SetWaitTimeSeconds(2).
-				Send(ctx)
-			if err != nil {
-				return
-			}
-			log.Printf("Worker B Received %d Messages:\n", receiveResult.MessagesReceived)
-			for _, msg := range receiveResult.Messages {
-				log.Printf("MessageID: %s, Body: %s", msg.MessageID, string(msg.Body))
-			}
-			log.Printf("Worker B notified of %d Expired Messages:\n", receiveResult.MessagesExpired)
-		}
-
-	}()
-	time.Sleep(3 * time.Second)
+	result, err = queuesClient.Pull(ctx, &kubemq.ReceiveQueueMessagesRequest{
+		ClientID:            "go-sdk-cookbook-queues-expire",
+		Channel:             channel,
+		MaxNumberOfMessages: 10,
+		WaitTimeSeconds:     1,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Pull After 5 Seconds Received %d Messages\n", result.MessagesReceived)
 }

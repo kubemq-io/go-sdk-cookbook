@@ -10,61 +10,51 @@ import (
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client, err := kubemq.NewClient(ctx,
+	commandsClient, err := kubemq.NewCommandsClient(ctx,
 		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-rpc-commands-client"),
+		kubemq.WithClientId("go-sdk-cookbook-rpc-commands-commandsClient"),
 		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer func() {
-		err := client.Close()
+		err := commandsClient.Close()
 		if err != nil {
 			log.Fatal(err)
 		}
 	}()
 	channel := "commands"
 
-	go func() {
-		errCh := make(chan error)
-		commandsCh, err := client.SubscribeToCommands(ctx, channel, "", errCh)
+	err = commandsClient.Subscribe(ctx, &kubemq.CommandsSubscription{
+		Channel:  channel,
+		ClientId: "go-sdk-cookbook-rpc-commands-subscriber",
+	}, func(cmd *kubemq.CommandReceive, err error) {
 		if err != nil {
 			log.Fatal(err)
-		}
-		for {
-			select {
-			case err := <-errCh:
+		} else {
+			log.Printf("Command Received:\nId %s\nChannel: %s\nMetadata: %s\nBody: %s\n", cmd.Id, cmd.Channel, cmd.Metadata, cmd.Body)
+			err := commandsClient.Response(ctx, kubemq.NewResponse().
+				SetRequestId(cmd.Id).
+				SetResponseTo(cmd.ResponseTo).
+				SetExecutedAt(time.Now()))
+			if err != nil {
 				log.Fatal(err)
-				return
-			case command, more := <-commandsCh:
-				if !more {
-					log.Println("Command Received , done")
-					return
-				}
-				log.Printf("Command Received:\nId %s\nChannel: %s\nMetadata: %s\nBody: %s\n", command.Id, command.Channel, command.Metadata, command.Body)
-				err := client.R().
-					SetRequestId(command.Id).
-					SetResponseTo(command.ResponseTo).
-					SetExecutedAt(time.Now()).
-					Send(ctx)
-				if err != nil {
-					log.Fatal(err)
-				}
-			case <-ctx.Done():
-				return
 			}
 		}
 
-	}()
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	// give some time to connect a receiver
 	time.Sleep(time.Second)
-	response, err := client.C().
+	response, err := commandsClient.Send(ctx, kubemq.NewCommand().
 		SetId("some-command-id").
 		SetChannel(channel).
 		SetMetadata("some-metadata").
 		SetBody([]byte("hello kubemq - sending a command, please reply")).
-		SetTimeout(time.Second).
-		Send(ctx)
+		SetTimeout(time.Second))
 	if err != nil {
 		log.Fatal(err)
 	}

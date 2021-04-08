@@ -2,161 +2,118 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/kubemq-io/kubemq-go"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client, err := kubemq.NewClient(ctx,
+	queuesClient, err := kubemq.NewQueuesClient(ctx,
 		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-queues-multicast-mix-client"),
+		kubemq.WithClientId("go-sdk-cookbook-queues-multicast-mix"),
 		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer func() {
-		err := client.Close()
+		err := queuesClient.Close()
 		if err != nil {
 			log.Fatal(err)
 		}
 	}()
-	eventsReceiver, err := kubemq.NewClient(ctx,
+	eventsClient, err := kubemq.NewEventsClient(ctx,
 		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-queues-multicast-mix-events-receiver"),
-		kubemq.WithTransportType(kubemq.TransportTypeGRPC),
-		kubemq.WithAutoReconnect(true))
-
+		kubemq.WithClientId("go-sdk-cookbook-queues-events-multicast-mix"),
+		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer func() {
-		err := eventsReceiver.Close()
+		err := eventsClient.Close()
 		if err != nil {
 			log.Fatal(err)
 		}
 	}()
 
-	eventsStoreReceiver, err := kubemq.NewClient(ctx,
+	err = eventsClient.Subscribe(ctx, &kubemq.EventsSubscription{
+		Channel:  "e1",
+		ClientId: "go-sdk-cookbook-queues-events-multicast-mix",
+	}, func(msg *kubemq.Event, err error) {
+		if err != nil {
+			log.Fatal(err)
+		} else {
+			log.Printf("Events Receiver  - Event Received:\nEventID: %s\nChannel: %s\nMetadata: %s\nBody: %s\n", msg.Id, msg.Channel, msg.Metadata, msg.Body)
+		}
+	})
+
+	eventsStoreClient, err := kubemq.NewEventsStoreClient(ctx,
 		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-queues-multicast-mix-events-store-receiver"),
-		kubemq.WithTransportType(kubemq.TransportTypeGRPC),
-		kubemq.WithAutoReconnect(true))
+		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer func() {
-		err := eventsStoreReceiver.Close()
+		err := eventsStoreClient.Close()
 		if err != nil {
 			log.Fatal(err)
 		}
 	}()
-	queueReceiver, err := kubemq.NewClient(ctx,
-		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-queues-multicast-mix-queue-receiver"),
-		kubemq.WithTransportType(kubemq.TransportTypeGRPC),
-		kubemq.WithAutoReconnect(true))
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer func() {
-		err := queueReceiver.Close()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}()
-	go func() {
-		errCh := make(chan error)
-		eventsCh, err := eventsReceiver.SubscribeToEvents(ctx, "e1", "", errCh)
+
+	err = eventsStoreClient.Subscribe(ctx, &kubemq.EventsStoreSubscription{
+		Channel:          "es1",
+		ClientId:         "go-sdk-cookbook-queues-events-store-multicast-mix",
+		SubscriptionType: kubemq.StartFromFirstEvent(),
+	}, func(msg *kubemq.EventStoreReceive, err error) {
 		if err != nil {
 			log.Fatal(err)
 			return
+		}
+		log.Printf("Events Store Receiver - Event Received:\nEventID: %s\nChannel: %s\nMetadata: %s\nBody: %s\n", msg.Id, msg.Channel, msg.Metadata, msg.Body)
+	})
+	if err != nil {
+		log.Fatal(err)
+		return
 
-		}
-		for {
-			select {
-			case err := <-errCh:
-				log.Fatal(err)
-				return
-			case event, more := <-eventsCh:
-				if !more {
-					log.Println("Events Receiver - Event Received, done")
-					return
-				}
-				log.Printf("Events Receiver - Event Received:\nEventID: %s\nChannel: %s\nMetadata: %s\nBody: %s\n", event.Id, event.Channel, event.Metadata, event.Body)
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	go func() {
-		errCh := make(chan error)
-		eventsCh, err := eventsStoreReceiver.SubscribeToEventsStore(ctx, "es1", "", errCh, kubemq.StartFromFirstEvent())
+	}
+	done, err := queuesClient.Subscribe(ctx, &kubemq.ReceiveQueueMessagesRequest{
+		ClientID:            "go-sdk-cookbook-queues-multicast-mix",
+		Channel:             "q1",
+		MaxNumberOfMessages: 10,
+		WaitTimeSeconds:     1,
+	}, func(response *kubemq.ReceiveQueueMessagesResponse, err error) {
 		if err != nil {
 			log.Fatal(err)
-			return
+		}
+		log.Printf("Pull Received %d Messages\n", response.MessagesReceived)
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	var batch []*kubemq.QueueMessage
+	for i := 0; i < 10; i++ {
+		batch = append(batch, kubemq.NewQueueMessage().
+			SetChannel("q1;events:e1;events_store:es1").
+			SetBody([]byte(fmt.Sprintf("Batch Message %d", i))))
 
-		}
-		for {
-			select {
-			case err := <-errCh:
-				log.Fatal(err)
-				return
-			case event, more := <-eventsCh:
-				if !more {
-					log.Println("Events Store Receiver - Event Received, done")
-					return
-				}
-				log.Printf("Events Store Receiver - Event Received:\nEventID: %s\nChannel: %s\nMetadata: %s\nBody: %s\n", event.Id, event.Channel, event.Metadata, event.Body)
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	go func() {
-
-		for {
-			receiveResult, err := queueReceiver.NewReceiveQueueMessagesRequest().
-				SetChannel("q1").
-				SetMaxNumberOfMessages(1).
-				SetWaitTimeSeconds(5).
-				Send(ctx)
-			if err != nil {
-				log.Fatal(err)
-			}
-			log.Printf("Queue Receiever Received %d Messages:\n", receiveResult.MessagesReceived)
-			for _, msg := range receiveResult.Messages {
-				log.Printf("MessageID: %s, Body: %s", msg.MessageID, string(msg.Body))
-			}
-		}
-	}()
-	time.Sleep(time.Second)
-	multicastChannel := "q1;events:e1;events_store:es1"
+	}
+	_, err = queuesClient.Batch(ctx, batch)
+	if err != nil {
+		log.Fatal(err)
+	}
 	var gracefulShutdown = make(chan os.Signal, 1)
 	signal.Notify(gracefulShutdown, syscall.SIGTERM)
 	signal.Notify(gracefulShutdown, syscall.SIGINT)
 	signal.Notify(gracefulShutdown, syscall.SIGQUIT)
-	for {
+	select {
 
-		sendResult, err := client.NewQueueMessage().
-			SetChannel(multicastChannel).
-			SetBody([]byte("some-simple_queue-queue-message")).
-			Send(ctx)
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("Send to Queue Result: MessageID:%s,Sent At: %s\n", sendResult.MessageID, time.Unix(0, sendResult.SentAt).String())
-		select {
-		case <-gracefulShutdown:
-			break
-		default:
-			time.Sleep(time.Second)
-		}
+	case <-gracefulShutdown:
+
 	}
+	done <- struct{}{}
 
 }

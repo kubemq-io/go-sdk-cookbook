@@ -2,74 +2,82 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/kubemq-io/kubemq-go"
+	"github.com/nats-io/nuid"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sender, err := kubemq.NewClient(ctx,
+	queuesClient, err := kubemq.NewQueuesClient(ctx,
 		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-queues-stream-extend-visibility-sender"),
+		kubemq.WithClientId("go-sdk-cookbook-queues-stream-extend"),
 		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer func() {
-		err := sender.Close()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}()
-	channel := "queues.extend-visibility"
-
-	sendResult, err := sender.NewQueueMessage().
-		SetChannel(channel).
-		SetBody([]byte("queue-message-with-for-extend-visibility")).
-		Send(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("Send to Queue Result: MessageID:%s,Sent At: %s\n", sendResult.MessageID, time.Unix(0, sendResult.SentAt).String())
-
-	receiver, err := kubemq.NewClient(ctx,
-		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-queues-stream-extend-visibility-receiver"),
-		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
-	if err != nil {
-		log.Fatal(err)
-
-	}
-	defer func() {
-		err := receiver.Close()
+		err := queuesClient.Close()
 		if err != nil {
 			log.Fatal(err)
 		}
 	}()
 
-	stream := receiver.NewStreamQueueMessage().SetChannel(channel)
-	// get message from the queue
-	msg, err := stream.Next(ctx, 5, 10)
+	channel := "queues.extend"
+
+	doneA, err := queuesClient.TransactionStream(ctx, &kubemq.QueueTransactionMessageRequest{
+		ClientID:          "go-sdk-cookbook-queues-stream-visibility",
+		Channel:           channel,
+		VisibilitySeconds: 1,
+		WaitTimeSeconds:   10,
+	}, func(response *kubemq.QueueTransactionMessageResponse, err error) {
+		if err != nil {
+
+		} else {
+			log.Printf("Queue: Receiver MessageID: %s, Body: %s - extend message", response.Message.MessageID, string(response.Message.Body))
+			err = response.ExtendVisibilitySeconds(5)
+			if err != nil {
+				log.Fatal(err)
+			}
+			time.Sleep(1 * time.Second)
+			log.Printf("Queue: Receiver MessageID: %s, Body: %s - ack message", response.Message.MessageID, string(response.Message.Body))
+			err = response.Ack()
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("MessageID: %s, Body: %s", msg.MessageID, string(msg.Body))
-	log.Println("work for 1 seconds")
-	time.Sleep(1000 * time.Millisecond)
-	log.Println("need more time to process, extend visibility for more 3 seconds")
-	err = msg.ExtendVisibility(3)
-	if err != nil {
-		log.Fatal(err)
+	for i := 1; i <= 10; i++ {
+		messageID := nuid.New().Next()
+		sendResult, err := queuesClient.Send(ctx, kubemq.NewQueueMessage().
+			SetId(messageID).
+			SetChannel(channel).
+			SetBody([]byte(fmt.Sprintf("sending message %d", i))))
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		log.Printf("Send to Queue Result: MessageID:%s,Sent At: %s\n", sendResult.MessageID, time.Unix(0, sendResult.SentAt).String())
 	}
-	log.Println("approved. work for 2.5 seconds")
-	time.Sleep(2500 * time.Millisecond)
-	log.Println("work done.... ack the message")
-	err = msg.Ack()
-	if err != nil {
-		log.Fatal(err)
+	var gracefulShutdown = make(chan os.Signal, 1)
+	signal.Notify(gracefulShutdown, syscall.SIGTERM)
+	signal.Notify(gracefulShutdown, syscall.SIGINT)
+	signal.Notify(gracefulShutdown, syscall.SIGQUIT)
+	select {
+
+	case <-gracefulShutdown:
+
 	}
-	log.Println("ack done")
-	stream.Close()
+	doneA <- struct{}{}
+
 }

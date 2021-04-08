@@ -6,14 +6,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/kubemq-io/kubemq-go"
 	"log"
-	"sync"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sender, err := kubemq.NewClient(ctx,
+	eventsStoreClient, err := kubemq.NewEventsStoreClient(ctx,
 		kubemq.WithAddress("localhost", 50000),
 		kubemq.WithClientId("go-sdk-cookbook-pubsub-events-store-offset-sender"),
 		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
@@ -21,7 +23,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer func() {
-		err := sender.Close()
+		err := eventsStoreClient.Close()
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -29,184 +31,88 @@ func main() {
 	randomChannel := uuid.New().String()
 	for i := 0; i < 10; i++ {
 		time.Sleep(time.Second)
-		result, err := sender.ES().
+		result, err := eventsStoreClient.Send(ctx, kubemq.NewEventStore().
 			SetChannel(randomChannel).
 			SetMetadata("some-metadata").
 			SetTags(map[string]string{"key1": "value1", "key2": "value2"}).
-			SetBody([]byte(fmt.Sprintf("hello kubemq - sending event store %d", i))).
-			Send(ctx)
+			SetBody([]byte(fmt.Sprintf("hello kubemq - sending event store %d", i))))
+
 		if err != nil {
 			log.Println(fmt.Sprintf("error sedning event %d, error: %s", i, err))
 		}
 		log.Printf("Send Message %d ,Result: Id: %s, Sent: %t\n", i, result.Id, result.Sent)
 	}
 	endTime := time.Now()
-	wg := sync.WaitGroup{}
-	wg.Add(4)
 
-	// Subscribe to get all messages form start
-	go func() {
-		defer wg.Done()
-		receiver, err := kubemq.NewClient(ctx,
-			kubemq.WithAddress("localhost", 50000),
-			kubemq.WithClientId("go-sdk-cookbook-pubsub-events-store-offset-receiver-start-from-first"),
-			kubemq.WithTransportType(kubemq.TransportTypeGRPC),
-			kubemq.WithAutoReconnect(true))
-
+	err = eventsStoreClient.Subscribe(ctx, &kubemq.EventsStoreSubscription{
+		Channel:          randomChannel,
+		ClientId:         "go-sdk-cookbook-pubsub-events-store-offset-receiver-start-from-first",
+		SubscriptionType: kubemq.StartFromFirstEvent(),
+	}, func(msg *kubemq.EventStoreReceive, err error) {
 		if err != nil {
 			log.Fatal(err)
+		} else {
+			log.Printf("Receiver Start From First- Event Store Received:\nEventID: %s\nChannel: %s\nMetadata: %s\nBody: %s\n", msg.Id, msg.Channel, msg.Metadata, msg.Body)
 		}
-		defer func() {
-			err := receiver.Close()
-			if err != nil {
-				log.Fatal(err)
-			}
-		}()
-		errCh := make(chan error)
-		eventsCh, err := receiver.SubscribeToEventsStore(ctx, randomChannel, "", errCh, kubemq.StartFromFirstEvent())
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = eventsStoreClient.Subscribe(ctx, &kubemq.EventsStoreSubscription{
+		Channel:          randomChannel,
+		ClientId:         "go-sdk-cookbook-pubsub-events-store-offset-receiver-start-seq",
+		SubscriptionType: kubemq.StartFromSequence(5),
+	}, func(msg *kubemq.EventStoreReceive, err error) {
 		if err != nil {
 			log.Fatal(err)
-			return
-
+		} else {
+			log.Printf("Receiver Start From Seq- Event Store Received:\nEventID: %s\nChannel: %s\nMetadata: %s\nBody: %s\n", msg.Id, msg.Channel, msg.Metadata, msg.Body)
 		}
-		for i := 0; i < 10; i++ {
-			select {
-			case err := <-errCh:
-				log.Fatal(err)
-				return
-			case event, more := <-eventsCh:
-				if !more {
-					log.Println("Receiver start from first - Event Store Received, done")
-					return
-				}
-				log.Printf("Receiver start from first - Event Store Received:\nEventID: %s\nChannel: %s\nMetadata: %s\nBody: %s\nSequence: %d\nTags: %d", event.Id, event.Channel, event.Metadata, event.Body, event.Sequence, len(event.Tags))
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	// Subscribe to get all messages from seq 5
-	go func() {
-		defer wg.Done()
-		receiver, err := kubemq.NewClient(ctx,
-			kubemq.WithAddress("localhost", 50000),
-			kubemq.WithClientId("go-sdk-cookbook-pubsub-events-store-offset-receiver-start-from-seq"),
-			kubemq.WithTransportType(kubemq.TransportTypeGRPC),
-			kubemq.WithAutoReconnect(true))
-
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = eventsStoreClient.Subscribe(ctx, &kubemq.EventsStoreSubscription{
+		Channel:          randomChannel,
+		ClientId:         "go-sdk-cookbook-pubsub-events-store-offset-receiver-start-time-delta",
+		SubscriptionType: kubemq.StartFromTimeDelta(3 * time.Second),
+	}, func(msg *kubemq.EventStoreReceive, err error) {
 		if err != nil {
 			log.Fatal(err)
+		} else {
+			log.Printf("Receiver Start From Time Delta- Event Store Received:\nEventID: %s\nChannel: %s\nMetadata: %s\nBody: %s\n", msg.Id, msg.Channel, msg.Metadata, msg.Body)
 		}
-		defer func() {
-			err := receiver.Close()
-			if err != nil {
-				log.Fatal(err)
-			}
-		}()
-		errCh := make(chan error)
-		eventsCh, err := receiver.SubscribeToEventsStore(ctx, randomChannel, "", errCh, kubemq.StartFromSequence(5))
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = eventsStoreClient.Subscribe(ctx, &kubemq.EventsStoreSubscription{
+		Channel:          randomChannel,
+		ClientId:         "go-sdk-cookbook-pubsub-events-store-offset-receiver-start-time",
+		SubscriptionType: kubemq.StartFromTime(endTime.Add(-3 * time.Second)),
+	}, func(msg *kubemq.EventStoreReceive, err error) {
 		if err != nil {
 			log.Fatal(err)
-			return
+		} else {
+			log.Printf("Receiver Start From Time - Event Store Received:\nEventID: %s\nChannel: %s\nMetadata: %s\nBody: %s\n", msg.Id, msg.Channel, msg.Metadata, msg.Body)
+		}
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
-		}
-		for i := 0; i < 10; i++ {
-			select {
-			case err := <-errCh:
-				log.Fatal(err)
-				return
-			case event, more := <-eventsCh:
-				if !more {
-					log.Println("Receiver start from sequence - Event Store Received, done")
-					return
-				}
-				log.Printf("Receiver start from sequence - Event Store Received:\nEventID: %s\nChannel: %s\nMetadata: %s\nBody: %s\nSequence: %d\nTags: %d", event.Id, event.Channel, event.Metadata, event.Body, event.Sequence, len(event.Tags))
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	// Subscribe to get all messages from 3 seconds ago
-	go func() {
-		defer wg.Done()
-		receiver, err := kubemq.NewClient(ctx,
-			kubemq.WithAddress("localhost", 50000),
-			kubemq.WithClientId("go-sdk-cookbook-pubsub-events-store-offset-receiver-start-from-time-delta"),
-			kubemq.WithTransportType(kubemq.TransportTypeGRPC),
-			kubemq.WithAutoReconnect(true))
+	time.Sleep(100 * time.Millisecond)
+	var gracefulShutdown = make(chan os.Signal, 1)
+	signal.Notify(gracefulShutdown, syscall.SIGTERM)
+	signal.Notify(gracefulShutdown, syscall.SIGINT)
+	signal.Notify(gracefulShutdown, syscall.SIGQUIT)
+	for {
 
-		if err != nil {
-			log.Fatal(err)
+		select {
+		case <-gracefulShutdown:
+			break
+		default:
+			time.Sleep(time.Second)
 		}
-		defer func() {
-			err := receiver.Close()
-			if err != nil {
-				log.Fatal(err)
-			}
-		}()
-		errCh := make(chan error)
-		eventsCh, err := receiver.SubscribeToEventsStore(ctx, randomChannel, "", errCh, kubemq.StartFromTimeDelta(3*time.Second))
-		if err != nil {
-			log.Fatal(err)
-			return
-
-		}
-		for i := 0; i < 10; i++ {
-			select {
-			case err := <-errCh:
-				log.Fatal(err)
-				return
-			case event, more := <-eventsCh:
-				if !more {
-					log.Println("Receiver start from time delta - Event Store Received, done")
-					return
-				}
-				log.Printf("Receiver start from time delta - Event Store Received:\nEventID: %s\nChannel: %s\nMetadata: %s\nBody: %s\nSequence: %d\nTags: %d", event.Id, event.Channel, event.Metadata, event.Body, event.Sequence, len(event.Tags))
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	// Subscribe to get all messages from specific time
-	go func() {
-		defer wg.Done()
-		receiver, err := kubemq.NewClient(ctx,
-			kubemq.WithAddress("localhost", 50000),
-			kubemq.WithClientId("go-sdk-cookbook-pubsub-events-store-offset-receiver-start-from-time"),
-			kubemq.WithTransportType(kubemq.TransportTypeGRPC),
-			kubemq.WithAutoReconnect(true))
-
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer func() {
-			err := receiver.Close()
-			if err != nil {
-				log.Fatal(err)
-			}
-		}()
-		errCh := make(chan error)
-		eventsCh, err := receiver.SubscribeToEventsStore(ctx, randomChannel, "", errCh, kubemq.StartFromTime(endTime.Add(-3*time.Second)))
-		if err != nil {
-			log.Fatal(err)
-			return
-
-		}
-		for i := 0; i < 10; i++ {
-			select {
-			case err := <-errCh:
-				log.Fatal(err)
-				return
-			case event, more := <-eventsCh:
-				if !more {
-					log.Println("Receiver start from time - Event Store Received, done")
-					return
-				}
-				log.Printf("Receiver start from time - Event Store Received:\nEventID: %s\nChannel: %s\nMetadata: %s\nBody: %s\nSequence: %d\nTags: %d", event.Id, event.Channel, event.Metadata, event.Body, event.Sequence, len(event.Tags))
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	wg.Wait()
+	}
 }

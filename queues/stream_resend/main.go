@@ -2,99 +2,99 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/kubemq-io/kubemq-go"
+	"github.com/nats-io/nuid"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sender, err := kubemq.NewClient(ctx,
+	queuesClient, err := kubemq.NewQueuesClient(ctx,
 		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-queues-delayed-sender"),
+		kubemq.WithClientId("go-sdk-cookbook-queues-stream-resend"),
 		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer func() {
-		err := sender.Close()
+		err := queuesClient.Close()
 		if err != nil {
 			log.Fatal(err)
 		}
 	}()
+
 	channel := "queues.resend"
 	resendToChannel := "queues.resend.new-destination"
+	doneA, err := queuesClient.TransactionStream(ctx, &kubemq.QueueTransactionMessageRequest{
 
-	sendResult, err := sender.NewQueueMessage().
-		SetChannel(channel).
-		SetBody([]byte("queue-message-resend")).
-		Send(ctx)
+		ClientID:          "go-sdk-cookbook-queues-stream-resend",
+		Channel:           channel,
+		VisibilitySeconds: 1,
+		WaitTimeSeconds:   10,
+	}, func(response *kubemq.QueueTransactionMessageResponse, err error) {
+		if err != nil {
+
+		} else {
+			log.Printf("Queue: Receiver ,MessageID: %s, Body: %s - resend message", response.Message.MessageID, string(response.Message.Body))
+			err = response.Resend(resendToChannel)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("Send to Queue Result: MessageID:%s,Sent At: %s\n", sendResult.MessageID, time.Unix(0, sendResult.SentAt).String())
 
-	receiver, err := kubemq.NewClient(ctx,
-		kubemq.WithAddress("localhost", 50000),
-		kubemq.WithClientId("go-sdk-cookbook-queues-stream-extend-visibility-receiver"),
-		kubemq.WithTransportType(kubemq.TransportTypeGRPC))
+	doneB, err := queuesClient.TransactionStream(ctx, &kubemq.QueueTransactionMessageRequest{
+		ClientID:          "go-sdk-cookbook-queues-stream-resend",
+		Channel:           resendToChannel,
+		VisibilitySeconds: 1,
+		WaitTimeSeconds:   10,
+	}, func(response *kubemq.QueueTransactionMessageResponse, err error) {
+		if err != nil {
+
+		} else {
+			log.Printf("Queue: Resend Receiver ,MessageID: %s, Body: %s - message accepted", response.Message.MessageID, string(response.Message.Body))
+			err = response.Ack()
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+
+	})
 	if err != nil {
 		log.Fatal(err)
-
 	}
-	defer func() {
-		err := receiver.Close()
+	for i := 1; i <= 10; i++ {
+		messageID := nuid.New().Next()
+		sendResult, err := queuesClient.Send(ctx, kubemq.NewQueueMessage().
+			SetId(messageID).
+			SetChannel(channel).
+			SetBody([]byte(fmt.Sprintf("sending message %d", i))))
 		if err != nil {
 			log.Fatal(err)
 		}
-	}()
 
-	stream := receiver.NewStreamQueueMessage().SetChannel(channel)
-	// get message from the queue
-	msg, err := stream.Next(ctx, 5, 10)
-	if err != nil {
-		log.Fatal(err)
+		log.Printf("Send to Queue Result: MessageID:%s,Sent At: %s\n", sendResult.MessageID, time.Unix(0, sendResult.SentAt).String())
 	}
-	log.Printf("MessageID: %s, Body: %s", msg.MessageID, string(msg.Body))
-	log.Println("resend to new queue")
+	var gracefulShutdown = make(chan os.Signal, 1)
+	signal.Notify(gracefulShutdown, syscall.SIGTERM)
+	signal.Notify(gracefulShutdown, syscall.SIGINT)
+	signal.Notify(gracefulShutdown, syscall.SIGQUIT)
+	select {
 
-	err = msg.Resend(resendToChannel)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println("done")
+	case <-gracefulShutdown:
 
-	// checking the new channel
-	stream = receiver.NewStreamQueueMessage().SetChannel(resendToChannel)
-	// get message from the queue
-	msg, err = stream.Next(ctx, 5, 10)
-	if err != nil {
-		log.Fatal(err)
 	}
-
-	log.Printf("MessageID: %s, Body: %s", msg.MessageID, string(msg.Body))
-	log.Println("resend with new message")
-	newMsg := receiver.NewQueueMessage().SetChannel(channel).SetBody([]byte("new message"))
-	err = stream.ResendWithNewMessage(newMsg)
-	if err != nil {
-		log.Fatal(err)
-	}
-	stream.Close()
-	log.Println("checking again the old queue")
-	stream = receiver.NewStreamQueueMessage().SetChannel(channel)
-	// get message from the queue
-	msg, err = stream.Next(ctx, 5, 10)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("MessageID: %s, Body: %s", msg.MessageID, string(msg.Body))
-
-	err = msg.Ack()
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println("ack and done")
-	stream.Close()
+	doneA <- struct{}{}
+	doneB <- struct{}{}
 
 }
